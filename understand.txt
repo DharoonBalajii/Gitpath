@@ -1,0 +1,501 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                    Gitpath — File Guide                               ║
+║                                                                              ║
+║  This file explains what every major file and folder does so that any       ║
+║  developer (or IDE AI assistant) can understand the project at a glance.    ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+────────────────────────────────────────────────────────────────────────────────
+PROJECT OVERVIEW
+────────────────────────────────────────────────────────────────────────────────
+
+Gitpath turns any public GitHub repository into an interactive learning
+course — structured lessons, quizzes, concept maps, an AI tutor, and a
+gamification system (XP, levels, streaks, leaderboard).
+
+Stack: Next.js 15 (App Router) · Prisma ORM · PostgreSQL (Supabase) · NextAuth v5
+       OpenAI-compatible AI (Gemini / OpenRouter / Vast.ai / Ollama)
+
+Data flow:
+  User pastes GitHub URL
+    → API clones the repo (simple-git)
+    → Static analysis maps files/imports/exports (ts-morph, web-tree-sitter)
+    → ONE AI call generates the full course JSON
+    → Course stored in PostgreSQL forever (never re-generated)
+    → All learners read from the cached DB record
+
+────────────────────────────────────────────────────────────────────────────────
+ROOT FILES
+────────────────────────────────────────────────────────────────────────────────
+
+.env.example            Template for all environment variables (copy to .env.local).
+                        Includes Supabase DB URLs, auth secrets, admin password,
+                        AI provider options, and observability keys.
+
+middleware.ts           Edge-safe request guard. Runs on every request BEFORE pages.
+                        - Protects /dashboard, /learn, /profile, /explore, /achievements
+                          by checking for the NextAuth session cookie.
+                        - Protects /admin/dashboard by checking for the admin
+                          HMAC token cookie (gp_admin_token).
+                        - Does NOT call Prisma/auth() here — edge runtime can't use Node.
+
+next.config.mjs         Next.js configuration. Security headers (CSP, HSTS, etc.),
+                        image domains, and environment variable forwarding.
+
+tailwind.config.ts      Tailwind CSS configuration. Adds custom brand colours
+                        (brand-indigo, brand-violet), animation utilities,
+                        and the "accent-gradient" class used throughout the UI.
+
+tsconfig.json           TypeScript config. Sets "@/*" path alias to project root.
+
+components.json         shadcn/ui component config. Controls where generated
+                        components land and which CSS variable names are used.
+
+turbo.json              Turborepo pipeline config (used when running the monorepo
+                        with pnpm workspaces via pnpm-workspace.yaml).
+
+docker-compose.yml      Defines a postgres:16-alpine service for production deploy
+                        (e.g. AWS Lightsail). Same credentials as the Supabase URL.
+
+understand.txt          ← This file. Explains the project to developers and AI tools.
+
+────────────────────────────────────────────────────────────────────────────────
+prisma/
+────────────────────────────────────────────────────────────────────────────────
+
+schema.prisma           The database schema. One source of truth for all tables.
+                        Key models:
+                          User          — learner accounts, XP, level, vibeScore
+                          Account       — OAuth provider links (NextAuth)
+                          Session       — DB-backed NextAuth sessions
+                          Repository    — a cloned GitHub repo (owner-scoped)
+                          RepositoryGraph — static analysis result (JSON)
+                          Course        — the AI-generated course for a repo
+                          Module        — a chapter within a course
+                          Lesson        — a single lesson (explanation + code + quiz)
+                          Quiz          — quiz question attached to a lesson
+                          QuizAttempt   — records each time a user answers a quiz
+                          UserProgress  — per-user per-lesson completion state + XP
+                          Concept       — a named coding concept (e.g. "react-context")
+                          ConceptMastery — user's mastery level (0-3) per concept
+                          Enrollment    — user enrolled in a course
+                          Badge / UserBadge — achievement badges
+                          TutorSession / TutorMessage — AI tutor chat history
+                          AIJob         — tracks async AI generation jobs
+
+seed-leaderboard.mjs    Seeds 10 fake users so the leaderboard is pre-populated.
+                        Fake users have isFakeUser=true and XP from 30 to 290.
+                        Run once with: node prisma/seed-leaderboard.mjs
+
+seed.ts                 Prisma seed file for concepts and initial data.
+
+────────────────────────────────────────────────────────────────────────────────
+lib/
+────────────────────────────────────────────────────────────────────────────────
+
+lib/auth.ts             NextAuth v5 configuration. Defines GitHub OAuth provider,
+                        uses Prisma adapter for DB-backed sessions. Exports auth(),
+                        signIn(), signOut() used throughout server components.
+
+lib/db/index.ts         Exports a singleton Prisma client (db). Prevents multiple
+                        client instances during Next.js hot-reload in development.
+
+lib/crypto/encryption.ts  AES-256-GCM encrypt/decrypt for GitHub OAuth tokens
+                          stored in the DB. Tokens are encrypted at rest.
+
+lib/logger.ts           Pino logger with Better Stack log drain integration.
+                        Logs are structured JSON in production.
+
+lib/turnstile.ts        Cloudflare Turnstile CAPTCHA verification. Called on
+                        the repository import form. Returns true immediately when
+                        TURNSTILE_SECRET_KEY is not configured (dev mode).
+
+lib/admin/auth.ts       Admin-only authentication utilities.
+                        - ADMIN_EMAILS: hard-coded list of authorised admin emails
+                        - verifyAdminCredentials(): checks email allowlist +
+                          timing-safe password comparison against ADMIN_PASSWORD env
+                        - createAdminToken(): creates a signed HMAC-SHA256 token
+                        - verifyAdminToken(): verifies signature + expiry
+                        - getAdminSession(): reads and verifies the admin cookie
+
+lib/ai/client.ts        OpenAI SDK client configured to call any OpenAI-compatible
+                        endpoint (Gemini, OpenRouter, Vast.ai, Ollama). The URL,
+                        model, and key come from AI_BASE_URL / AI_MODEL / AI_API_KEY.
+                        Also contains step-by-step Vast.ai GPU setup instructions
+                        as comments at the top of the file.
+
+lib/ai/generator.ts     The main course generation function. Takes a repository
+                        analysis result and calls the AI once to produce a full
+                        course JSON (modules + lessons + quizzes). Sanitises output
+                        and saves everything to the database in one transaction.
+
+lib/ai/prompts.ts       System prompts and response parsers for the AI. Includes
+                        parseJSONFromResponse() which extracts valid JSON from the
+                        AI's output even if it includes markdown fences or trailing
+                        commas.
+
+lib/analyzer/index.ts   Orchestrates the static analysis pipeline:
+                          1. Lists all source files in the cloned repo
+                          2. Extracts imports/exports via ts-morph
+                          3. Detects frameworks, package manager, languages
+                          4. Builds a RepositoryGraph (stored as JSON in the DB)
+
+lib/pipeline/inline.ts  Runs the full clone→analyse→generate pipeline in-process
+                        (no Redis/BullMQ required). Used when PIPELINE_MODE=inline.
+                        Idempotent: skips steps already completed.
+
+lib/queue/              BullMQ queue definition and worker for production use.
+                        The worker processes generation jobs asynchronously so
+                        the web server stays responsive.
+
+lib/utils/cn.ts         Tiny utility: merges Tailwind class names with clsx + tailwind-merge.
+lib/utils/xp.ts         XP and level calculation functions:
+                          levelFromXp(xp)         — level 1-100 from raw XP
+                          xpToReachLevel(n)        — total XP needed to reach level n
+                          xpNeededForLevel(n)      — XP gap between level n and n+1
+                          xpProgressInLevel(xp, l) — current/needed/pct for the progress bar
+                          normaliseVibe(raw)        — maps 0-∞ raw vibe to 0-100 display
+
+lib/types/              TypeScript interfaces for AI-generated course structures,
+                        repository analysis results, and shared domain types.
+
+lib/validators/         Zod schemas for validating API request bodies and AI output.
+
+────────────────────────────────────────────────────────────────────────────────
+app/ — Next.js App Router
+────────────────────────────────────────────────────────────────────────────────
+
+app/layout.tsx          Root layout. Wraps everything in ThemeProvider (next-themes),
+                        PostHog, Google Analytics, and Sentry.
+
+app/globals.css         Global CSS. Defines CSS custom properties (--background,
+                        --foreground, --brand-indigo, etc.) for light and dark mode.
+                        Contains utility classes: .accent-gradient-bg, .lift-card,
+                        .glow-blob, .text-accent-gradient.
+
+app/page.tsx            Public landing page (/). Shows hero, features, comparison
+                        table, FAQ. Redirects authenticated users to /dashboard.
+
+────────────────────────────────────────────────────────────────────────────────
+app/(auth)/ — Authentication pages (no sidebar)
+────────────────────────────────────────────────────────────────────────────────
+
+app/(auth)/login/page.tsx     Login page (/login). GitHub OAuth button.
+                              Includes a dev-login shortcut (non-production only).
+app/(auth)/layout.tsx         Minimal layout for auth pages.
+
+────────────────────────────────────────────────────────────────────────────────
+app/(app)/ — Protected app pages (with sidebar)
+────────────────────────────────────────────────────────────────────────────────
+
+app/(app)/layout.tsx          Shared layout for all logged-in pages.
+                              Verifies the NextAuth session; redirects to /login
+                              if not authenticated. Renders the AppSidebar.
+
+app/(app)/dashboard/page.tsx  Main dashboard (/dashboard). Shows:
+                              - StatsCards (XP, level, streak, concept count)
+                              - VibeBar (animated coding activity bar)
+                              - "My Repositories" list (only the user's own repos)
+                              - Import form (paste a GitHub URL)
+
+app/(app)/explore/page.tsx    Repository list page (/explore). Shows the same repos
+                              as the dashboard list view. Scoped to session.user.id.
+
+app/(app)/profile/page.tsx    User profile (/profile). Shows:
+                              - Level progress bar
+                              - Stat boxes (streak, concepts, mastered, member since)
+                              - "Concepts I've Mastered" (3 tiers: Introduced / Practiced / Mastered)
+                              - "Completed Lessons" list with XP earned
+
+app/(app)/leaderboard/page.tsx  Top 10 users by XP (/leaderboard). Includes
+                                10 pre-seeded fake users so new users have targets
+                                to beat. Shows "YOU" badge on the current user's row.
+
+app/(app)/achievements/page.tsx  Badges and achievements page (/achievements).
+
+────────────────────────────────────────────────────────────────────────────────
+app/learn/ — Lesson rendering
+────────────────────────────────────────────────────────────────────────────────
+
+app/learn/[courseId]/page.tsx         Course overview page. Lists all modules and
+                                      lessons with completion status and XP.
+
+app/learn/[courseId]/lesson/[lessonId]/page.tsx
+                                      Individual lesson page. Fetches the lesson
+                                      from the DB, maps it to GeneratedLesson shape,
+                                      and renders LessonTemplate. Computes nextLessonId
+                                      so "Next lesson" button works automatically.
+
+────────────────────────────────────────────────────────────────────────────────
+app/admin/ — Admin panel (separate auth, no user sidebar)
+────────────────────────────────────────────────────────────────────────────────
+
+app/admin/layout.tsx              Minimal layout for admin pages. Sets robots=noindex
+                                  so search engines don't index the admin panel.
+
+app/admin/login/page.tsx          Admin login page (/admin/login).
+                                  Email + password form. Calls POST /api/admin/auth.
+                                  On success, receives an httpOnly cookie and
+                                  redirects to /admin/dashboard.
+                                  Authorised emails: balajiilabs@gmail.com,
+                                                     dharoonbalajiie@gmail.com
+                                  Password: set via ADMIN_PASSWORD env variable.
+
+app/admin/dashboard/page.tsx      Admin statistics dashboard (/admin/dashboard).
+                                  Server component — verifies admin cookie, fetches
+                                  all stats from the DB, renders AdminDashboardClient.
+                                  Shows: total users, lesson completions, quiz accuracy,
+                                  XP aggregates, recent signups, top learners, bar charts.
+                                  NO sensitive data: no GitHub tokens, no passwords.
+
+────────────────────────────────────────────────────────────────────────────────
+app/api/ — API routes
+────────────────────────────────────────────────────────────────────────────────
+
+app/api/auth/[...nextauth]/route.ts   NextAuth handler. Handles GitHub OAuth
+                                      callbacks and session management.
+
+app/api/repositories/route.ts        POST — imports a new GitHub repo.
+                                      Clones, analyses, kicks off course generation.
+                                      Scoped to session.user.id (repos are private).
+
+app/api/progress/quiz-answer/route.ts POST — records a quiz answer.
+                                      Awards XP (15 correct / 5 wrong), increments
+                                      vibeScore, updates ConceptMastery level.
+
+app/api/progress/complete-lesson/route.ts  POST — marks a lesson as completed.
+                                           Awards lesson XP, bumps vibeScore +50,
+                                           upserts ConceptMastery at level 1 for
+                                           all concepts in the lesson. Idempotent.
+
+app/api/admin/auth/route.ts           POST — admin login (sets gp_admin_token cookie).
+                                      DELETE — admin logout (clears the cookie).
+
+app/api/admin/stats/route.ts          GET — returns aggregate platform stats for
+                                      the admin dashboard. Protected by admin cookie.
+                                      Returns: user counts, lesson completions,
+                                      quiz accuracy, XP aggregates, top users,
+                                      daily chart data. NO sensitive fields.
+
+app/api/dev-login/route.ts            GET — development-only shortcut login.
+                                      Disabled in production (NODE_ENV check).
+
+app/api/health/route.ts               GET — uptime check endpoint for Better Stack.
+                                      Returns { status: "ok", db: "connected" }.
+
+────────────────────────────────────────────────────────────────────────────────
+app/(legal)/ — Legal pages
+────────────────────────────────────────────────────────────────────────────────
+
+app/privacy/page.tsx    Privacy Policy (/privacy). 14 sections covering GDPR, CCPA,
+                        COPPA, PIPEDA. Sidebar table of contents with anchor links.
+
+app/terms/page.tsx      Terms of Service (/terms). 18 sections covering eligibility,
+                        acceptable use, DMCA, limitation of liability, governing law.
+
+────────────────────────────────────────────────────────────────────────────────
+app/demo/ — Public demo (no login required)
+────────────────────────────────────────────────────────────────────────────────
+
+app/demo/lesson/page.tsx  Hardcoded example lesson (/demo/lesson). Shows the full
+                          lesson UI with concept map, code walkthrough, quiz, and
+                          Learn More modals — without requiring a database or auth.
+
+────────────────────────────────────────────────────────────────────────────────
+components/
+────────────────────────────────────────────────────────────────────────────────
+
+components/ui/            shadcn/ui primitive components (Button, Avatar, Dialog,
+                          Progress, Tabs, etc.). These are copy-pasted, not imported
+                          from a package, so they can be customised freely.
+
+components/Reveal.tsx     Intersection-observer animation wrapper. Children fade+slide
+                          in when they scroll into view. Used on the landing page.
+
+components/ThemeToggle.tsx  Sun/moon toggle button. Calls next-themes setTheme().
+
+components/layout/
+  AppSidebar.tsx          Left sidebar for all logged-in pages. Shows nav items
+                          (Dashboard, Repositories, Leaderboard, Achievements, Profile),
+                          the user's avatar, and Privacy/Terms micro-links at the bottom.
+  TopBar.tsx              Top bar shown on dashboard pages. Shows XP progress badge
+                          and level indicator.
+
+components/landing/
+  LiveGraphBackground.tsx   Animated canvas that draws a live node-network graph.
+                            Used as the hero section background on the landing page.
+  InteractiveMindmap.tsx    SVG mindmap preview in the browser mockup on the landing
+                            page. Animates concept nodes connecting to a central repo node.
+
+components/dashboard/
+  StatsCards.tsx            Four stat cards shown at the top of the dashboard:
+                            XP (with progress bar to next level), Streak,
+                            Concepts mastered, Lessons completed.
+  VibeBar.tsx               Animated "Vibe Coding Bar". Reads rawVibe from the User
+                            model, normalises it to 0-100, and fills a gradient bar
+                            with a pulsing dot. Uses requestAnimationFrame for smooth
+                            count-up animation.
+
+components/lesson/
+  LessonTemplate.tsx        Main lesson renderer. Accepts a GeneratedLesson object
+                            and renders: concept map, code snippets, explanation,
+                            real-world analogy, quiz, best practices.
+                            Handles "complete lesson" API call on quiz finish.
+  QuizBlock.tsx             Quiz UI. Supports MULTIPLE_CHOICE, CODE_COMPLETION,
+                            DEBUGGING, ARCHITECTURE, FREE_RESPONSE quiz types.
+                            Calls POST /api/progress/quiz-answer on each answer.
+  LearnMore.tsx             "Learn More" modal that opens when a concept chip is
+                            clicked. Shows: What is it / Why it matters / Real world /
+                            Go deeper. Has a built-in knowledge base for common concepts.
+  CodeBlock.tsx             Syntax-highlighted code block. Pure JS/TS highlighter —
+                            no external library. Handles copy-to-clipboard.
+  ConceptMapDesigns.tsx     Three concept map layout options: Radial, Tree, Roadmap.
+                            User can switch between them on the lesson page.
+  CodeWalkthrough.tsx       Step-by-step code walkthrough component. Two modes:
+                            Stacked (all steps visible) and Stepped (one at a time).
+
+components/admin/
+  AdminDashboardClient.tsx  Client component for the admin dashboard. Receives stats
+                            as props from the server component. Handles logout button,
+                            refresh button, stat cards, user tables, and CSS bar charts.
+
+────────────────────────────────────────────────────────────────────────────────
+pages/ — Legacy Pages Router (only for special cases)
+────────────────────────────────────────────────────────────────────────────────
+
+pages/_document.tsx    Custom HTML document. Only used if a page requires special
+                       <head> tags not achievable in the App Router metadata API.
+
+────────────────────────────────────────────────────────────────────────────────
+public/ — Static assets
+────────────────────────────────────────────────────────────────────────────────
+
+public/favicon.ico, og-image.png, etc.  Static files served as-is by Next.js.
+
+────────────────────────────────────────────────────────────────────────────────
+packages/ (pnpm workspaces)
+────────────────────────────────────────────────────────────────────────────────
+
+packages/tsconfig/    Shared TypeScript configs used by sub-packages.
+
+────────────────────────────────────────────────────────────────────────────────
+AI COST ESTIMATE — OpenRouter vs Vast.ai
+────────────────────────────────────────────────────────────────────────────────
+
+Token usage per repository:
+  Small repo  (<10 files, e.g. a utility library):
+    Input:  3,000–8,000 tokens  (repo content + system prompt)
+    Output: 5,000–12,000 tokens (course JSON: 5–7 modules, 15–21 lessons)
+    Total:  ~8,000–20,000 tokens
+
+  Medium repo (10–50 files, typical npm package):
+    Input:  10,000–30,000 tokens
+    Output: 8,000–20,000 tokens
+    Total:  ~18,000–50,000 tokens
+
+  Large repo  (50+ files, e.g. a full Next.js app):
+    Input:  30,000–80,000 tokens
+    Output: 12,000–30,000 tokens
+    Total:  ~42,000–110,000 tokens
+
+OPTION A — OpenRouter (RECOMMENDED for starting out)
+  Model: google/gemini-2.5-flash
+    Input:  $0.075/MTok    Output: $0.30/MTok
+    Cost per small repo:   ~$0.0006–0.004
+    Cost per medium repo:  ~$0.003–0.012
+    Cost per large repo:   ~$0.009–0.030
+  Model: deepseek/deepseek-v3
+    Input:  $0.14/MTok     Output: $0.28/MTok
+    Cost per small repo:   ~$0.001–0.004
+    Cost per medium repo:  ~$0.005–0.020
+
+  ✅ No upfront cost — pay as you go
+  ✅ No GPU setup or maintenance
+  ✅ Switch models by changing one env var
+  ✅ Gemini 2.5 Flash is excellent at structured JSON (course generation)
+  ✅ Google AI Studio gives 1,000,000 free tokens/day for development
+
+OPTION B — Vast.ai GPU (better at scale)
+  Hardware: RTX 4090 (2x) @ ~$0.50–$0.80/hr
+  Model: Llama 3.3 70B Q4_K_M (runs on ~40 GB VRAM)
+  Generation speed: 30–120 seconds per repo
+  Cost per repo: ~$0.004–0.027
+
+  ✅ Cheapest per-token at high volume (>100 repos/day)
+  ✅ No third-party data sharing (model runs on YOUR rented GPU)
+  ❌ Setup time: 20–30 minutes per session
+  ❌ GPU availability can vary
+  ❌ Quality may be lower than Gemini for structured JSON
+
+VERDICT:
+  Start → OpenRouter (google/gemini-2.5-flash or gemini via AI Studio free tier)
+  Scale → Switch to Vast.ai when processing >50 repos/day AND quality is acceptable
+
+  The AI_BASE_URL / AI_API_KEY / AI_MODEL env vars make switching providers
+  a one-line change in .env.local — no code changes needed.
+
+────────────────────────────────────────────────────────────────────────────────
+DEVELOPMENT WORKFLOW
+────────────────────────────────────────────────────────────────────────────────
+
+1. Copy .env.example to .env.local and fill in your values.
+
+2. Start the embedded local PostgreSQL:
+     pnpm db:local
+   (Uses embedded-postgres — no Docker or system Postgres needed)
+
+3. Apply the schema to the local DB:
+     DATABASE_URL="postgresql://postgres:postgres@localhost:5432/gitpath" \
+     DIRECT_URL="postgresql://postgres:postgres@localhost:5432/gitpath" \
+     pnpm prisma db push
+
+4. (Optional) Seed the leaderboard with fake users:
+     node prisma/seed-leaderboard.mjs
+
+5. Start the dev server:
+     pnpm dev
+
+6. Log in without GitHub OAuth:
+     Visit http://localhost:3000/api/dev-login (dev only)
+
+7. Visit the admin panel:
+     http://localhost:3000/admin/login
+     Email:    balajiilabs@gmail.com  OR  dharoonbalajiie@gmail.com
+     Password: set in ADMIN_PASSWORD env var
+
+IMPORTANT: After running "prisma db push", always RESTART the dev server.
+Next.js hot-reload does NOT reload the Prisma client across schema changes.
+
+────────────────────────────────────────────────────────────────────────────────
+SUPABASE SETUP GUIDE
+────────────────────────────────────────────────────────────────────────────────
+
+1. Create a free Supabase project at https://supabase.com
+2. Go to Settings → Database → Connection Pooling → Copy "Transaction" mode URL
+   → Paste as DATABASE_URL in .env.local
+3. Go to Settings → Database → Connection string → URI → Copy direct URL
+   → Paste as DIRECT_URL in .env.local
+4. Run: pnpm prisma db push
+   (This creates all tables in your Supabase project)
+5. Run: node prisma/seed-leaderboard.mjs
+   (This populates the leaderboard with fake users)
+6. That's it — the app is now backed by Supabase PostgreSQL.
+
+To switch to Amazon RDS later:
+  Change DATABASE_URL and DIRECT_URL to your RDS connection strings.
+  Nothing else changes — Prisma, the schema, and all code stay identical.
+
+────────────────────────────────────────────────────────────────────────────────
+SECURITY NOTES
+────────────────────────────────────────────────────────────────────────────────
+
+- GitHub OAuth tokens are encrypted with AES-256-GCM before storage (lib/crypto/)
+- Admin sessions use HMAC-SHA256 signed tokens with expiry (24h)
+- Admin password comparison uses crypto.timingSafeEqual (prevents timing attacks)
+- Repository queries are always scoped to session.user.id (no cross-user data leak)
+- Admin panel is robots=noindex and behind a separate auth system
+- The admin panel NEVER returns GitHub tokens, passwords, or session secrets
+- httpOnly cookies prevent JavaScript from reading auth tokens (XSS protection)
+- SameSite=Lax on cookies prevents CSRF attacks
+
+────────────────────────────────────────────────────────────────────────────────
