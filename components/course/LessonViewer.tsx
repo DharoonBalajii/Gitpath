@@ -79,7 +79,7 @@ export function LessonViewer({
   const handleComplete = () => {
     startTransition(async () => {
       const res = await fetch(`/api/lessons/${lesson.id}/complete`, { method: 'POST' });
-      const data = await res.json() as { success: boolean; data?: { xpEarned: number } };
+      const data = await res.json() as { success: boolean; data?: { xpEarned: number; alreadyCompleted?: boolean } };
       if (data.success && !data.data?.alreadyCompleted) {
         setCompleted(true);
         setXpEarned(data.data?.xpEarned ?? 0);

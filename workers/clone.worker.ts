@@ -72,7 +72,7 @@ export function startCloneWorker() {
       }
     },
     {
-      connection: createRedisConnection(),
+      connection: createRedisConnection() as any,
       concurrency: 3,         // clone 3 repos at a time
     },
   );

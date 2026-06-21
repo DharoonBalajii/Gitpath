@@ -52,8 +52,8 @@ export function VibeBar({ rawVibe }: VibeBarProps) {
       <div className="h-3 w-full overflow-hidden rounded-full bg-muted">
         <div
           className="h-full rounded-full ease-out"
-          style={{ transition: 'width 1200ms cubic-bezier(0,0,0.2,1)' }}
           style={{
+            transition: 'width 1200ms cubic-bezier(0,0,0.2,1)',
             width: `${pct}%`,
             background: pct >= 80
               ? 'linear-gradient(90deg, #f43f5e, #fb923c)'

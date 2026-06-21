@@ -30,7 +30,7 @@ let _courseQueue: Queue<CourseGenerationJobPayload> | null = null;
 export function getCloneQueue(): Queue<CloneJobPayload> {
   if (!_cloneQueue) {
     _cloneQueue = new Queue<CloneJobPayload>(QUEUE_NAMES.CLONE, {
-      connection: getRedis(),
+      connection: getRedis() as any,
       defaultJobOptions,
     });
   }
@@ -40,7 +40,7 @@ export function getCloneQueue(): Queue<CloneJobPayload> {
 export function getAnalysisQueue(): Queue<AnalysisJobPayload> {
   if (!_analysisQueue) {
     _analysisQueue = new Queue<AnalysisJobPayload>(QUEUE_NAMES.ANALYSIS, {
-      connection: getRedis(),
+      connection: getRedis() as any,
       defaultJobOptions,
     });
   }
@@ -50,7 +50,7 @@ export function getAnalysisQueue(): Queue<AnalysisJobPayload> {
 export function getCourseGenerationQueue(): Queue<CourseGenerationJobPayload> {
   if (!_courseQueue) {
     _courseQueue = new Queue<CourseGenerationJobPayload>(QUEUE_NAMES.COURSE_GENERATION, {
-      connection: getRedis(),
+      connection: getRedis() as any,
       defaultJobOptions: {
         ...defaultJobOptions,
         // Course generation can take several minutes — long timeout

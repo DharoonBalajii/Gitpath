@@ -47,7 +47,7 @@ export function startCourseGenerationWorker() {
           conceptTags: repo.graph.conceptTags,
           architectureType: repo.graph.architectureType,
           complexity: repo.graph.complexity,
-        } as RepositoryGraph;
+        } as any;
 
         await job.updateProgress(5);
         await generateCourse(repositoryId, graph, repo.clonePath);
@@ -92,7 +92,7 @@ export function startCourseGenerationWorker() {
       }
     },
     {
-      connection: createRedisConnection(),
+      connection: createRedisConnection() as any,
       concurrency: 1,    // one AI job at a time — GPU is the bottleneck
       limiter: {
         max: 1,

@@ -22,8 +22,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json<APIResponse>({ success: false, error: 'Unauthorized' }, { status: 401 });
   }
 
+  const userId = session.user.id;
+
   // Rate limit tutor: 20 messages per hour per user
-  const rl = rateLimit(`tutor:${session.user.id}`, 20, 60 * 60 * 1000);
+  const rl = rateLimit(`tutor:${userId}`, 20, 60 * 60 * 1000);
   if (!rl.success) {
     return NextResponse.json<APIResponse>(
       { success: false, error: 'Tutor rate limit reached. Try again in an hour.', code: 'RATE_LIMITED' },
@@ -73,7 +75,7 @@ export async function POST(req: NextRequest) {
   }
   if (!tutorSession) {
     tutorSession = await db.tutorSession.create({
-      data: { userId: session.user.id, repositoryId },
+      data: { userId, repositoryId },
     });
   }
 
@@ -89,7 +91,7 @@ export async function POST(req: NextRequest) {
   await db.tutorMessage.create({
     data: {
       sessionId: tutorSession.id,
-      userId: session.user.id,
+      userId,
       role: 'USER',
       content: message,
     },
@@ -136,7 +138,7 @@ export async function POST(req: NextRequest) {
       await db.tutorMessage.create({
         data: {
           sessionId: tutorSession.id,
-          userId: session.user.id,
+          userId,
           role: 'ASSISTANT',
           content: fullResponse,
         },
