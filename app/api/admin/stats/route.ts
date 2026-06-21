@@ -14,6 +14,8 @@ import { NextResponse } from 'next/server';
 import { getAdminSession } from '@/lib/admin/auth';
 import { db } from '@/lib/db';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   // Verify the admin session cookie before returning any data
   const session = await getAdminSession();

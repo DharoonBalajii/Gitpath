@@ -9,6 +9,8 @@ import * as fs from 'fs';
 import { auth, signOut } from '@/lib/auth';
 import { db } from '@/lib/db/client';
 
+export const dynamic = 'force-dynamic';
+
 const CLONE_BASE_DIR = process.env.CLONE_BASE_DIR ?? '/tmp/gitpath/repos';
 const DELETION_GRACE_DAYS = 30;
 

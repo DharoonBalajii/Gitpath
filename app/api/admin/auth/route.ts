@@ -14,6 +14,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminToken, verifyAdminCredentials, ADMIN_COOKIE } from '@/lib/admin/auth';
 import { z } from 'zod';
 
+export const dynamic = 'force-dynamic';
+
 // Validate incoming login request body
 const LoginSchema = z.object({
   email: z.string().email(),

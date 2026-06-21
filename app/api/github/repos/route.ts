@@ -6,6 +6,8 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import type { APIResponse } from '@/lib/types/index';
 
+export const dynamic = 'force-dynamic';
+
 interface GitHubRepo {
   id: number;
   name: string;
