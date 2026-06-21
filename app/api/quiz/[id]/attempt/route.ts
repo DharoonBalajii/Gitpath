@@ -6,6 +6,8 @@ import { auth } from '@/lib/auth';
 import { db } from '@/lib/db/client';
 import type { APIResponse } from '@/lib/types/index';
 
+export const dynamic = 'force-dynamic';
+
 const attemptSchema = z.object({
   answer: z.string().min(1),
 });

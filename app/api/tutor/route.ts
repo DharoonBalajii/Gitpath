@@ -10,6 +10,8 @@ import { buildTutorSystemPrompt } from '@/lib/ai/prompts';
 import { rateLimit } from '@/lib/utils/rate-limit';
 import type { APIResponse, RepositoryGraph, TutorMessageItem } from '@/lib/types/index';
 
+export const dynamic = 'force-dynamic';
+
 const tutorMessageSchema = z.object({
   repositoryId: z.string().cuid(),
   message: z.string().min(1).max(2000),

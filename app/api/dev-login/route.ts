@@ -7,6 +7,8 @@ import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 import { db } from '@/lib/db/client';
 
+export const dynamic = 'force-dynamic';
+
 const DEV_EMAIL = 'dev@gitpath.local';
 const SESSION_DAYS = 30;
 

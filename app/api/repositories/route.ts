@@ -9,6 +9,8 @@ import { rateLimit } from '@/lib/utils/rate-limit';
 import { verifyTurnstile } from '@/lib/turnstile';
 import type { APIResponse } from '@/lib/types/index';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
